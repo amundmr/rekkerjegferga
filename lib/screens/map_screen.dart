@@ -29,6 +29,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   List<FerryStop> _stops = [];
   int _selectedIndex = 0;
   Duration? _driveTime;
+  List<LatLng> _routePoints = [];
   List<Departure> _departures = [];
   bool _loadingStops = false;
   bool _centeredOnUser = false;
@@ -37,6 +38,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   Position? _lastDriveTimePosition;
   DateTime? _lastDriveTimeAt;
   bool _appActive = true;
+  bool _zoomAfterRoute = false;
   BitmapDescriptor? _locationMarkerIcon;
 
   StreamSubscription<Position>? _positionSub;
@@ -147,7 +149,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (_position == null || _stops.isEmpty) return;
     final pos = _position!;
     final stop = _stops[_selectedIndex];
-    final duration = await DriveTimeService.getDriveTime(
+    final result = await DriveTimeService.getDriveTime(
       originLat: pos.latitude,
       originLng: pos.longitude,
       destLat: stop.latitude,
@@ -156,7 +158,39 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (!mounted) return;
     _lastDriveTimePosition = pos;
     _lastDriveTimeAt = DateTime.now();
-    setState(() => _driveTime = duration);
+    setState(() {
+      _driveTime = result.duration;
+      _routePoints = result.route;
+    });
+    if (_zoomAfterRoute) {
+      _zoomAfterRoute = false;
+      _zoomToFitRoute();
+    }
+  }
+
+  void _zoomToFitRoute() {
+    if (_routePoints.isEmpty || _mapController == null) return;
+    var minLat = _routePoints.first.latitude;
+    var maxLat = _routePoints.first.latitude;
+    var minLng = _routePoints.first.longitude;
+    var maxLng = _routePoints.first.longitude;
+    for (final p in _routePoints) {
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
+      if (p.longitude < minLng) minLng = p.longitude;
+      if (p.longitude > maxLng) maxLng = p.longitude;
+    }
+    // Expand bounds by 15% on each side — more reliable than the
+    // padding parameter which doesn't work consistently on Flutter Web.
+    final latPad = (maxLat - minLat) * 0.15;
+    final lngPad = (maxLng - minLng) * 0.15;
+    _mapController!.animateCamera(CameraUpdate.newLatLngBounds(
+      LatLngBounds(
+        southwest: LatLng(minLat - latPad, minLng - lngPad),
+        northeast: LatLng(maxLat + latPad, maxLng + lngPad),
+      ),
+      0,
+    ));
   }
 
   Future<void> _refreshDepartures() async {
@@ -171,12 +205,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     setState(() {
       _selectedIndex = index;
       _driveTime = null;
+      _routePoints = [];
       _departures = [];
     });
-    _mapController?.animateCamera(CameraUpdate.newLatLng(
-      LatLng(_stops[index].latitude, _stops[index].longitude),
-    ));
     _lastDriveTimeAt = null; // force immediate refresh for new port
+    _zoomAfterRoute = true;
     _refreshDriveTime();
     _refreshDepartures();
   }
@@ -254,6 +287,14 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             myLocationButtonEnabled: false,
             zoomControlsEnabled: false,
             mapToolbarEnabled: false,
+            polylines: _routePoints.isEmpty ? const <Polyline>{} : {
+              Polyline(
+                polylineId: const PolylineId('route'),
+                points: _routePoints,
+                color: const Color(0xFF1D4ED8),
+                width: 5,
+              ),
+            },
             markers: {
               if (_position != null)
                 Marker(

@@ -1,10 +1,13 @@
 import 'dart:convert';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
+
+typedef DriveTimeResult = ({Duration? duration, List<LatLng> route});
 
 class DriveTimeService {
   static const _baseUrl = 'https://gateway.amund-56d.workers.dev';
 
-  static Future<Duration?> getDriveTime({
+  static Future<DriveTimeResult> getDriveTime({
     required double originLat,
     required double originLng,
     required double destLat,
@@ -21,10 +24,20 @@ class DriveTimeService {
       );
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final seconds = data['seconds'] as int?;
-      if (seconds == null) return null;
-      return Duration(seconds: seconds);
+      final rawPoints = data['points'] as List?;
+      final route = rawPoints
+              ?.map((p) => LatLng(
+                    (p[0] as num).toDouble(),
+                    (p[1] as num).toDouble(),
+                  ))
+              .toList() ??
+          [];
+      return (
+        duration: seconds != null ? Duration(seconds: seconds) : null,
+        route: route,
+      );
     } catch (_) {
-      return null;
+      return (duration: null, route: <LatLng>[]);
     }
   }
 }
