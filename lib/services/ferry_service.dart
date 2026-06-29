@@ -10,13 +10,16 @@ class FerryService {
     'ET-Client-Name': 'hand-built-rekkerjegferga',
   };
 
-  static const _carFerrySubmodes = {'localCarFerry', 'nationalCarFerry', 'internationalCarFerry'};
+  static const _carFerrySubmodes = {
+    'localCarFerry',
+    'nationalCarFerry',
+    'internationalCarFerry'
+  };
 
   static bool _hasCarFerry(Map<String, dynamic> place) {
     final quays = place['quays'] as List? ?? [];
     for (final quay in quays) {
-      final lines = quay['lines'] as List? ?? [];
-      for (final line in lines) {
+      for (final line in (quay['lines'] as List? ?? [])) {
         if (_carFerrySubmodes.contains(line['transportSubmode'])) return true;
       }
     }
@@ -77,7 +80,7 @@ class FerryService {
           .toList();
     } catch (e, st) {
       // ignore: avoid_print
-      print('[FerryService] error: $e\n$st');
+      print('[FerryService] nearbyStops error: $e\n$st');
       return [];
     }
   }
@@ -104,9 +107,11 @@ class FerryService {
       final res = await http.post(
         Uri.parse(_endpoint),
         headers: _headers,
-        body: jsonEncode({'query': query, 'variables': {'id': stopId, 'startTime': startTime}}),
+        body: jsonEncode(
+            {'query': query, 'variables': {'id': stopId, 'startTime': startTime}}),
       );
-      final quays = jsonDecode(res.body)['data']['stopPlace']['quays'] as List;
+      final quays =
+          jsonDecode(res.body)['data']['stopPlace']['quays'] as List;
       final all = <Departure>[];
       for (final quay in quays) {
         for (final call in (quay['estimatedCalls'] as List)) {
@@ -119,7 +124,6 @@ class FerryService {
         }
       }
       all.sort((a, b) => a.time.compareTo(b.time));
-      // deduplicate by minute (multiple quays can list the same sailing)
       final seen = <String>{};
       return all.where((d) {
         final key = '${d.time.hour}:${d.time.minute}';

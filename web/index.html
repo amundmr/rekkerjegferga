@@ -27,6 +27,7 @@
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="favicon.svg"/>
   <link rel="icon" type="image/png" href="favicon.png"/>
 
   <title>Rekker jeg ferga?</title>
@@ -35,6 +36,27 @@
 <body>
   <!-- Maps JS key: restrict to your domain in Google Cloud Console before going live -->
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCqYRTSr6guVm41bNo9AxvrYdMYVv7eXL0"></script>
+  <script>
+    // Patch google.maps.Map to capture the instance Flutter creates,
+    // then expose helpers so Dart can toggle gestureHandling.
+    (function () {
+      const _Orig = google.maps.Map;
+      class PatchedMap extends _Orig {
+        constructor(el, opts) {
+          super(el, opts);
+          window._flutterMap = this;
+        }
+      }
+      google.maps.Map = PatchedMap;
+
+      window.disableMapGestures = function () {
+        if (window._flutterMap) window._flutterMap.setOptions({ gestureHandling: 'none' });
+      };
+      window.enableMapGestures = function () {
+        if (window._flutterMap) window._flutterMap.setOptions({ gestureHandling: 'auto' });
+      };
+    })();
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

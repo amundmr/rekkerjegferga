@@ -2,14 +2,10 @@ import 'package:geolocator/geolocator.dart';
 
 class LocationService {
   static Future<LocationPermission> ensurePermission() async {
-    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) return LocationPermission.denied;
-
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-    return permission;
+    // Only check current state — do not call requestPermission(), which fires
+    // getCurrentPosition() and causes a redundant browser prompt.
+    // watchPosition() (from positionStream) triggers the single browser prompt.
+    return Geolocator.checkPermission();
   }
 
   static Stream<Position> positionStream() {
