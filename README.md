@@ -29,19 +29,25 @@ Husk å bytte `_baseUrl` i `lib/services/drive_time_service.dart` til `http://lo
 | `main` | rekkerjegferga.pages.dev | Produksjon — ekte brukere |
 | `dev`  | dev.rekkerjegferga.pages.dev | Utvikling — test her først |
 
-Cloudflare Pages deployer begge branches automatisk ved push.
-
 **Arbeidsflyt:**
 1. Jobb på `dev`-branchen
-2. Test på `dev.rekkerjegferga.pages.dev`
-3. Når klar for produksjon: `git checkout main && git merge dev && git push`
+2. Bygg og deploy til dev: se kommandoer under
+3. Test på `dev.rekkerjegferga.pages.dev`
+4. Når klar for produksjon: `git checkout main && git merge dev && git push`
+5. Bygg og deploy til prod: se kommandoer under
 
 ## Deploy
 
-Flutter-bygg og deploy til Cloudflare Pages:
+Dev (→ dev.rekkerjegferga.pages.dev):
 ```bash
 flutter build web --release --base-href /
-npx wrangler pages deploy build/web --project-name rekkerjegferga
+npx wrangler pages deploy build/web --project-name rekkerjegferga --branch dev
+```
+
+Prod (→ rekkerjegferga.pages.dev):
+```bash
+flutter build web --release --base-href /
+npx wrangler pages deploy build/web --project-name rekkerjegferga --branch main
 ```
 
 Worker-deploy (fra `/gateway`):
