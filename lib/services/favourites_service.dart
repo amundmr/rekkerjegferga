@@ -1,20 +1,21 @@
 import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:web/web.dart' as web;
 
 class FavouritesService {
-  // v2 key stores id→name as JSON; v1 (id-only list) is intentionally not migrated.
-  static const _key = 'favourite_stops_v2';
+  static const _key = 'rekker_favourites';
 
-  static Future<Map<String, String>> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_key);
+  static Map<String, String> load() {
+    final raw = web.window.localStorage.getItem(_key);
     if (raw == null) return {};
-    final decoded = jsonDecode(raw) as Map<String, dynamic>;
-    return decoded.cast<String, String>();
+    try {
+      final decoded = jsonDecode(raw) as Map<String, dynamic>;
+      return decoded.cast<String, String>();
+    } catch (_) {
+      return {};
+    }
   }
 
-  static Future<void> save(Map<String, String> favourites) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_key, jsonEncode(favourites));
+  static void save(Map<String, String> favourites) {
+    web.window.localStorage.setItem(_key, jsonEncode(favourites));
   }
 }

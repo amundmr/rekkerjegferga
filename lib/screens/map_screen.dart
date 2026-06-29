@@ -57,9 +57,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    FavouritesService.load().then((favs) {
-      if (mounted) setState(() => _favourites = favs);
-    });
+    setState(() => _favourites = FavouritesService.load());
     _buildLocationMarker().then((icon) {
       if (mounted) setState(() => _locationMarkerIcon = icon);
     });
