@@ -8,10 +8,12 @@ class LocationService {
     return Geolocator.checkPermission();
   }
 
-  static Stream<Position> positionStream() {
+  static Stream<Position> positionStream({
+    LocationAccuracy accuracy = LocationAccuracy.high,
+  }) {
     return Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
+      locationSettings: LocationSettings(
+        accuracy: accuracy,
         distanceFilter: 10,
       ),
     );

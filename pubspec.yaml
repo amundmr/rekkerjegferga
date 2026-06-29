@@ -37,6 +37,7 @@ dependencies:
   http: ^1.2.0
   pointer_interceptor: ^0.10.1+2
   web: ^1.1.1
+  shared_preferences: ^2.5.5
 
 dev_dependencies:
   flutter_test:

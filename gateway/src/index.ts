@@ -59,7 +59,7 @@ async function handleDriveTime(request: Request, env: Env): Promise<Response> {
 			headers: {
 				'Content-Type': 'application/json',
 				'X-Goog-Api-Key': env.GOOGLE_MAPS_API_KEY,
-				'X-Goog-FieldMask': 'routes.duration,routes.polyline.encodedPolyline',
+				'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline',
 			},
 			body: JSON.stringify({
 				origin: { location: { latLng: { latitude: originLat, longitude: originLng } } },
@@ -71,7 +71,7 @@ async function handleDriveTime(request: Request, env: Env): Promise<Response> {
 	);
 
 	const data = await routesRes.json() as {
-		routes?: { duration: string; polyline?: { encodedPolyline: string } }[];
+		routes?: { duration: string; distanceMeters?: number; polyline?: { encodedPolyline: string } }[];
 	};
 	const route = data.routes?.[0];
 	if (!route?.duration) {
@@ -83,5 +83,5 @@ async function handleDriveTime(request: Request, env: Env): Promise<Response> {
 		? decodePolyline(route.polyline.encodedPolyline)
 		: null;
 
-	return corsResponse(JSON.stringify({ seconds, points }));
+	return corsResponse(JSON.stringify({ seconds, distanceMeters: route.distanceMeters ?? null, points }));
 }

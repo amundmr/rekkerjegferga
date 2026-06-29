@@ -8,6 +8,7 @@ import 'package:pointer_interceptor/pointer_interceptor.dart';
 import '../models/departure.dart';
 import '../models/ferry_stop.dart';
 import '../services/drive_time_service.dart';
+import '../services/favourites_service.dart';
 import '../services/ferry_service.dart';
 import '../services/location_service.dart';
 
@@ -29,6 +30,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   List<FerryStop> _stops = [];
   int _selectedIndex = 0;
   Duration? _driveTime;
+  double? _distanceMeters;
   List<LatLng> _routePoints = [];
   List<Departure> _departures = [];
   bool _loadingStops = false;
@@ -37,6 +39,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   Position? _lastDriveTimePosition;
   DateTime? _lastDriveTimeAt;
+  Set<String> _favourites = {};
+  bool _locationUnavailable = false;
+  bool _usingApproximateLocation = false;
+  bool _locationWarningDismissed = false;
   bool _appActive = true;
   bool _zoomAfterRoute = false;
   BitmapDescriptor? _locationMarkerIcon;
@@ -44,11 +50,15 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   StreamSubscription<Position>? _positionSub;
   Timer? _departureRefreshTimer;
   Timer? _uiTicker;
+  Timer? _locationTimeoutTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    FavouritesService.load().then((favs) {
+      if (mounted) setState(() => _favourites = favs);
+    });
     _buildLocationMarker().then((icon) {
       if (mounted) setState(() => _locationMarkerIcon = icon);
     });
@@ -88,12 +98,40 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   Future<void> _init() async {
     final permission = await LocationService.ensurePermission();
     if (permission == LocationPermission.deniedForever) {
+      if (mounted) setState(() => _locationUnavailable = true);
       return;
     }
-    _positionSub = LocationService.positionStream().listen(_onPosition);
+    _locationTimeoutTimer = Timer(const Duration(seconds: 10), () {
+      if (_position == null && mounted) _fallbackToApproximate();
+    });
+    _positionSub = LocationService.positionStream().listen(
+      _onPosition,
+      onError: (_) => _fallbackToApproximate(),
+    );
     // Departures are free — refresh every 60 seconds.
     _departureRefreshTimer =
         Timer.periodic(const Duration(seconds: 60), (_) => _refreshDepartures());
+  }
+
+  void _fallbackToApproximate() {
+    if (!mounted) return;
+    _positionSub?.cancel();
+    setState(() => _usingApproximateLocation = true);
+    _positionSub = LocationService.positionStream(
+      accuracy: LocationAccuracy.medium,
+    ).listen(
+      _onPosition,
+      onError: (_) {
+        if (mounted) setState(() => _locationUnavailable = true);
+      },
+    );
+    // If medium also yields nothing within 8s (e.g. browser denied),
+    // escalate to the hard unavailable error.
+    Timer(const Duration(seconds: 8), () {
+      if (_position == null && mounted) {
+        setState(() => _locationUnavailable = true);
+      }
+    });
   }
 
   bool _shouldRefreshDriveTime(Position pos) {
@@ -114,7 +152,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   Future<void> _onPosition(Position pos) async {
     if (!mounted) return;
-    setState(() => _position = pos);
+    _locationTimeoutTimer?.cancel();
+    setState(() {
+      _position = pos;
+      _locationUnavailable = false;
+    });
     if (!_centeredOnUser && _mapController != null) {
       _centeredOnUser = true;
       _mapController!.animateCamera(
@@ -135,7 +177,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         await FerryService.nearbyStops(_position!.latitude, _position!.longitude);
     if (!mounted) return;
     setState(() {
-      _stops = stops;
+      _stops = _sortedStops(stops);
       _selectedIndex = 0;
       _loadingStops = false;
     });
@@ -143,6 +185,29 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       _refreshDriveTime();
       _refreshDepartures();
     }
+  }
+
+  List<FerryStop> _sortedStops(List<FerryStop> stops) {
+    return [...stops]..sort((a, b) {
+        final aFav = _favourites.contains(a.id);
+        final bFav = _favourites.contains(b.id);
+        if (aFav == bFav) return a.distanceMeters.compareTo(b.distanceMeters);
+        return aFav ? -1 : 1;
+      });
+  }
+
+  void _toggleFavourite(String stopId) {
+    final selectedId = _stops[_selectedIndex].id;
+    setState(() {
+      if (_favourites.contains(stopId)) {
+        _favourites.remove(stopId);
+      } else {
+        _favourites.add(stopId);
+      }
+      _stops = _sortedStops(_stops);
+      _selectedIndex = _stops.indexWhere((s) => s.id == selectedId);
+    });
+    FavouritesService.save(_favourites);
   }
 
   Future<void> _refreshDriveTime() async {
@@ -160,6 +225,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _lastDriveTimeAt = DateTime.now();
     setState(() {
       _driveTime = result.duration;
+      _distanceMeters = result.distanceMeters;
       _routePoints = result.route;
     });
     if (_zoomAfterRoute) {
@@ -205,6 +271,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     setState(() {
       _selectedIndex = index;
       _driveTime = null;
+      _distanceMeters = null;
       _routePoints = [];
       _departures = [];
     });
@@ -267,6 +334,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _positionSub?.cancel();
+    _locationTimeoutTimer?.cancel();
     _departureRefreshTimer?.cancel();
     _uiTicker?.cancel();
     _mapController?.dispose();
@@ -335,11 +403,18 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 child: _StatsBar(
                   stopName:
                       _stops.isNotEmpty ? _stops[_selectedIndex].name : null,
+                  isFavourite: _stops.isNotEmpty &&
+                      _favourites.contains(_stops[_selectedIndex].id),
+                  onFavouriteToggle: _stops.isNotEmpty
+                      ? () => _toggleFavourite(_stops[_selectedIndex].id)
+                      : null,
                   driveTime: _driveTime,
+                  distanceMeters: _distanceMeters,
                   prevMargin: _marginFor(_prevDep),
                   nextMargin: _marginFor(_nextDep),
                   prevDeparture: _prevDep?.time,
                   nextDeparture: _nextDep?.time,
+                  waitingForLocation: _position == null,
                   loading: _loadingStops,
                   onTap: () => _showDepartureSheet(context),
                 ),
@@ -360,11 +435,25 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                     child: _PortSwitcher(
                       stops: _stops,
                       selectedIndex: _selectedIndex,
+                      favourites: _favourites,
                       onSelected: _selectPort,
                     ),
                   ),
                 ),
               ),
+            ),
+          if (_locationUnavailable)
+            _LocationBanner(
+              color: const Color(0xF0DC2626),
+              icon: Icons.location_off,
+              message: 'Posisjon utilgjengelig — GPS eller nettverksposisjon kreves for å bruke appen.',
+            ),
+          if (_usingApproximateLocation && !_locationWarningDismissed && !_locationUnavailable)
+            _LocationBanner(
+              color: const Color(0xF0D97706),
+              icon: Icons.gps_not_fixed,
+              message: 'Omtrentlig posisjon (WiFi/mobilnett). Aktiver GPS for best nøyaktighet.',
+              onDismiss: () => setState(() => _locationWarningDismissed = true),
             ),
         ],
       ),
@@ -374,20 +463,82 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
 // ── Stats bar ──────────────────────────────────────────────────────────────────
 
+class _LocationBanner extends StatelessWidget {
+  const _LocationBanner({
+    required this.color,
+    required this.icon,
+    required this.message,
+    this.onDismiss,
+  });
+
+  final Color color;
+  final IconData icon;
+  final String message;
+  final VoidCallback? onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: SafeArea(
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: Colors.white, size: 18),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(message,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500)),
+              ),
+              if (onDismiss != null) ...[
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: onDismiss,
+                  child: const Icon(Icons.close,
+                      color: Colors.white, size: 18),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _StatsBar extends StatelessWidget {
   const _StatsBar({
     required this.stopName,
+    required this.isFavourite,
+    required this.onFavouriteToggle,
     required this.driveTime,
+    required this.distanceMeters,
     required this.prevMargin,
     required this.nextMargin,
     required this.prevDeparture,
     required this.nextDeparture,
+    required this.waitingForLocation,
     required this.loading,
     required this.onTap,
   });
 
   final String? stopName;
+  final bool isFavourite;
+  final bool waitingForLocation;
+  final VoidCallback? onFavouriteToggle;
   final Duration? driveTime;
+  final double? distanceMeters;
   final Duration? prevMargin;
   final Duration? nextMargin;
   final DateTime? prevDeparture;
@@ -419,7 +570,18 @@ class _StatsBar extends StatelessWidget {
   String _prevLabel() => prevMargin == null ? '—' : '−${_formatMins(prevMargin!)}';
   String _nextLabel() => nextMargin == null ? '—' : '+${_formatMins(nextMargin!)}';
 
-  String _prevSubLabel() => prevDeparture == null ? 'Forrige ferge' : 'Rekker ikke ${_hhmm(prevDeparture)}';
+  String _prevSubLabel() {
+    if (prevDeparture == null) return 'Forrige ferge';
+    final now = DateTime.now();
+    if (prevDeparture!.isAfter(now) && distanceMeters != null) {
+      final secsAvailable = prevDeparture!.difference(now).inSeconds;
+      if (secsAvailable > 0) {
+        final kmh = (distanceMeters! / 1000) / (secsAvailable / 3600);
+        return 'Kjør minst ${kmh.round()} km/t for å rekke ${_hhmm(prevDeparture)}';
+      }
+    }
+    return 'Rekker ikke ${_hhmm(prevDeparture)}';
+  }
   String _nextSubLabel() => nextDeparture == null ? 'Neste ferge'   : 'Rekker ${_hhmm(nextDeparture)}';
 
   Color _nextColor() {
@@ -440,12 +602,29 @@ class _StatsBar extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
         ),
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-        child: loading
-            ? const Center(
+        child: (waitingForLocation || loading)
+            ? Center(
                 child: Padding(
-                  padding: EdgeInsets.symmetric(vertical: 6),
-                  child: Text('Søker etter ferger…',
-                      style: TextStyle(color: Colors.white54, fontSize: 14)),
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white38),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        waitingForLocation
+                            ? 'Henter posisjon…'
+                            : 'Søker etter ferger…',
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 14),
+                      ),
+                    ],
+                  ),
                 ),
               )
             : Column(
@@ -453,6 +632,19 @@ class _StatsBar extends StatelessWidget {
                 children: [
                   Row(
                     children: [
+                      if (stopName != null) ...[
+                        GestureDetector(
+                          onTap: onFavouriteToggle,
+                          child: Icon(
+                            isFavourite ? Icons.star : Icons.star_border,
+                            color: isFavourite
+                                ? Colors.amber
+                                : Colors.white38,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                      ],
                       Expanded(
                         child: Text(
                           stopName ?? '—',
@@ -677,11 +869,13 @@ class _PortSwitcher extends StatelessWidget {
   const _PortSwitcher({
     required this.stops,
     required this.selectedIndex,
+    required this.favourites,
     required this.onSelected,
   });
 
   final List<FerryStop> stops;
   final int selectedIndex;
+  final Set<String> favourites;
   final ValueChanged<int> onSelected;
 
   @override
@@ -716,18 +910,31 @@ class _PortSwitcher extends StatelessWidget {
                     children: [
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Text(
-                          stops[i].name,
-                          style: TextStyle(
-                            color: i == selectedIndex
-                                ? Colors.white
-                                : Colors.white60,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          textAlign: TextAlign.center,
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 2,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (favourites.contains(stops[i].id)) ...[
+                              const Icon(Icons.star,
+                                  color: Colors.white38, size: 12),
+                              const SizedBox(width: 3),
+                            ],
+                            Flexible(
+                              child: Text(
+                                stops[i].name,
+                                style: TextStyle(
+                                  color: i == selectedIndex
+                                      ? Colors.white
+                                      : Colors.white60,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                textAlign: TextAlign.center,
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 2,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       const SizedBox(height: 2),
