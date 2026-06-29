@@ -911,18 +911,6 @@ class _DepartureSheet extends StatelessWidget {
 
 // ── Port switcher ──────────────────────────────────────────────────────────────
 
-PopupMenuItem<String> _menuItem(String value, IconData icon, String label) {
-  return PopupMenuItem(
-    value: value,
-    child: Row(
-      children: [
-        Icon(icon, color: Colors.white70, size: 18),
-        const SizedBox(width: 10),
-        Text(label, style: const TextStyle(color: Colors.white)),
-      ],
-    ),
-  );
-}
 
 class _PortSwitcher extends StatelessWidget {
   const _PortSwitcher({
@@ -1033,9 +1021,30 @@ class _PortSwitcher extends StatelessWidget {
               }
             },
             itemBuilder: (_) => [
-              _menuItem('info', Icons.info_outline, 'Info'),
-              _menuItem('favourites', Icons.star_outline, 'Favoritter'),
-              _menuItem('coffee', Icons.coffee, 'Kjøp meg en kaffe'),
+              PopupMenuItem(
+                value: 'info',
+                child: Row(children: [
+                  const Icon(Icons.info_outline, color: Colors.white70, size: 18),
+                  const SizedBox(width: 10),
+                  const Text('Info', style: TextStyle(color: Colors.white)),
+                ]),
+              ),
+              PopupMenuItem(
+                value: 'favourites',
+                child: Row(children: [
+                  const Icon(Icons.star_outline, color: Colors.white70, size: 18),
+                  const SizedBox(width: 10),
+                  const Text('Favoritter', style: TextStyle(color: Colors.white)),
+                ]),
+              ),
+              PopupMenuItem(
+                value: 'coffee',
+                child: Row(children: [
+                  const Icon(Icons.coffee, color: Colors.white70, size: 18),
+                  const SizedBox(width: 10),
+                  const Text('Kjøp meg en kaffe', style: TextStyle(color: Colors.white)),
+                ]),
+              ),
             ],
           ),
         ],
