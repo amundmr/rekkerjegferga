@@ -219,6 +219,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       originLng: pos.longitude,
       destLat: stop.latitude,
       destLng: stop.longitude,
+      destinationStopId: stop.id,
+      destinationName: stop.name,
     );
     if (!mounted) return;
     _lastDriveTimePosition = pos;

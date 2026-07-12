@@ -12,6 +12,8 @@ class DriveTimeService {
     required double originLng,
     required double destLat,
     required double destLng,
+    String? destinationStopId,
+    String? destinationName,
   }) async {
     try {
       final res = await http.post(
@@ -20,6 +22,8 @@ class DriveTimeService {
         body: jsonEncode({
           'origin': '$originLat,$originLng',
           'destination': '$destLat,$destLng',
+          'destinationStopId': ?destinationStopId,
+          'destinationName': ?destinationName,
         }),
       );
       final data = jsonDecode(res.body) as Map<String, dynamic>;

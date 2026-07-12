@@ -7,7 +7,13 @@
 	"observability": {
 		"enabled": true
 	},
-	"upload_source_maps": true
+	"upload_source_maps": true,
+	"kv_namespaces": [
+		{
+			"binding": "PLACE_CACHE",
+			"id": "be8ad75042ee4bcc9f3b681e29167c4b"
+		}
+	]
 	// Secrets (set via `wrangler secret put`):
 	//   GOOGLE_MAPS_API_KEY
 }
