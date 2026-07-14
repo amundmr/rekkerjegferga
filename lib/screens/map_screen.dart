@@ -283,6 +283,21 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     ));
   }
 
+  void _openNavigation() {
+    if (_stops.isEmpty) return;
+    final stop = _stops[_selectedIndex];
+    // Prefer the last point of the computed route — it reflects the
+    // Places-resolved arrival coordinate, which is often more accurate
+    // than Entur's raw quay coordinate (see gateway drive-time resolution).
+    final dest = _routePoints.isNotEmpty
+        ? _routePoints.last
+        : LatLng(stop.latitude, stop.longitude);
+    final url = 'https://www.google.com/maps/dir/?api=1'
+        '&destination=${dest.latitude},${dest.longitude}'
+        '&travelmode=driving&dir_action=navigate';
+    web.window.open(url, '_blank');
+  }
+
   void _showInfoDialog(BuildContext context) {
     _disableMapGestures();
     showDialog(
@@ -602,6 +617,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                           onInfo: () => _showInfoDialog(context),
                           onFavourites: () => _showFavouritesSheet(context),
                           onCustomOrigin: _enterCustomOriginMode,
+                          onNavigate: _openNavigation,
                         ),
                       ],
                     ),
@@ -1158,6 +1174,7 @@ class _PortSwitcher extends StatelessWidget {
     required this.onInfo,
     required this.onFavourites,
     required this.onCustomOrigin,
+    required this.onNavigate,
   });
 
   final List<FerryStop> stops;
@@ -1167,6 +1184,7 @@ class _PortSwitcher extends StatelessWidget {
   final VoidCallback onInfo;
   final VoidCallback onFavourites;
   final VoidCallback onCustomOrigin;
+  final VoidCallback onNavigate;
 
   @override
   Widget build(BuildContext context) {
@@ -1253,6 +1271,7 @@ class _PortSwitcher extends StatelessWidget {
             icon: const Icon(Icons.more_vert, color: Colors.white54, size: 22),
             color: const Color(0xFF1F2937),
             onSelected: (value) {
+              if (value == 'navigate') onNavigate();
               if (value == 'info') onInfo();
               if (value == 'favourites') onFavourites();
               if (value == 'custom_origin') onCustomOrigin();
@@ -1261,6 +1280,14 @@ class _PortSwitcher extends StatelessWidget {
               }
             },
             itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'navigate',
+                child: Row(children: [
+                  const Icon(Icons.navigation_outlined, color: Colors.white70, size: 18),
+                  const SizedBox(width: 10),
+                  const Text('Naviger dit', style: TextStyle(color: Colors.white)),
+                ]),
+              ),
               PopupMenuItem(
                 value: 'info',
                 child: Row(children: [
