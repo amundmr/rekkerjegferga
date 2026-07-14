@@ -126,7 +126,7 @@ class FerryService {
       all.sort((a, b) => a.time.compareTo(b.time));
       final seen = <String>{};
       return all.where((d) {
-        final key = '${d.time.hour}:${d.time.minute}';
+        final key = '${d.time.hour}:${d.time.minute}:${d.destination}';
         return seen.add(key);
       }).toList();
     } catch (_) {

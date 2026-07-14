@@ -64,3 +64,7 @@ npx wrangler secret put GOOGLE_MAPS_API_KEY
 
 - **Maps JS API-nøkkel** (frontend) — ligger i `web/index.html`, begrenset til `*.rekkerjegferga.pages.dev/*` i Google Cloud Console
 - **Routes API-nøkkel** (backend) — lagret som Wrangler secret `GOOGLE_MAPS_API_KEY`, kun Routes API aktivert, ingen referrer-begrensning
+
+## Kjente/pågående problemer
+
+- **Entur `nearest()` mangler enkelte fergekaier i nærhets-søket.** Eksempel: fra Skei (61.5392092, 6.4406246) returnerer Enturs `nearest`-spørring aldri "Hella ferjekai" (`NSR:StopPlace:58324`, ~38 km unna), verken med `filterByModes: [water]` eller helt ufiltrert — testet med en uttømmende, ikke-avkuttet radius på 45 km (431 treff, siste i 44 972 m) uten at Hella dukker opp. Stedet finnes og har korrekt data (bl.a. `localCarFerry`-kai) når det hentes direkte via `stopPlace(id: ...)`, så det er stedet selv som mangler i Enturs nærhetsindeks — ikke noe som kan løses med spørringsparametre på vår side. Appen viser i stedet "Dragsvik ferjekai" (~88 km unna), som ruten uansett må passere gjennom Hella-Dragsvik-fergen for å nå, og gir dermed helt feil kjøretid/margin. Bør meldes til Entur. Se `lib/services/ferry_service.dart` `nearbyStops()`.

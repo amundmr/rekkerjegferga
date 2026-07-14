@@ -8,6 +8,7 @@ import 'package:pointer_interceptor/pointer_interceptor.dart';
 import '../models/departure.dart';
 import '../models/ferry_stop.dart';
 import 'package:web/web.dart' as web;
+import '../services/destination_preference_service.dart';
 import '../services/drive_time_service.dart';
 import '../services/favourites_service.dart';
 import '../services/ferry_service.dart';
@@ -34,6 +35,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   double? _distanceMeters;
   List<LatLng> _routePoints = [];
   List<Departure> _departures = [];
+  Map<String, String> _destinationPrefs = {};
+  String? _selectedDestination;
+  bool _customOriginMode = false;
+  LatLng? _customOrigin;
   bool _loadingStops = false;
   bool _centeredOnUser = false;
   bool _sheetOpen = false;
@@ -58,6 +63,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     setState(() => _favourites = FavouritesService.load());
+    _destinationPrefs = DestinationPreferenceService.load();
     _buildLocationMarker().then((icon) {
       if (mounted) setState(() => _locationMarkerIcon = icon);
     });
@@ -108,8 +114,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       onError: (_) => _fallbackToApproximate(),
     );
     // Departures are free — refresh every 60 seconds.
-    _departureRefreshTimer =
-        Timer.periodic(const Duration(seconds: 60), (_) => _refreshDepartures());
+    _departureRefreshTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      _refreshDepartures();
+      // Position-triggered refresh is suppressed with a custom origin, so
+      // poll on the same timer here to keep traffic-aware drive time fresh.
+      if (_customOrigin != null) _refreshDriveTime();
+    });
   }
 
   void _fallbackToApproximate() {
@@ -135,6 +145,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   bool _shouldRefreshDriveTime(Position pos) {
     if (!_appActive) return false;
+    if (_customOrigin != null) return false;
     if (_lastDriveTimeAt == null) return true;
     final elapsed = DateTime.now().difference(_lastDriveTimeAt!);
     if (elapsed >= const Duration(minutes: 10)) return true;
@@ -171,16 +182,26 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   Future<void> _loadStops() async {
     if (_position == null) return;
+    await _loadStopsFor(_position!.latitude, _position!.longitude);
+  }
+
+  Future<void> _loadStopsFor(double lat, double lng) async {
     setState(() => _loadingStops = true);
-    final stops =
-        await FerryService.nearbyStops(_position!.latitude, _position!.longitude);
+    final stops = await FerryService.nearbyStops(lat, lng);
     if (!mounted) return;
     setState(() {
       _stops = _sortedStops(stops);
       _selectedIndex = 0;
       _loadingStops = false;
+      _departures = [];
+      _selectedDestination = null;
+      _driveTime = null;
+      _distanceMeters = null;
+      _routePoints = [];
     });
     if (stops.isNotEmpty) {
+      _lastDriveTimeAt = null;
+      _zoomAfterRoute = true;
       _refreshDriveTime();
       _refreshDepartures();
     }
@@ -211,19 +232,20 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshDriveTime() async {
-    if (_position == null || _stops.isEmpty) return;
-    final pos = _position!;
+    final origin = _customOrigin ??
+        (_position != null ? LatLng(_position!.latitude, _position!.longitude) : null);
+    if (origin == null || _stops.isEmpty) return;
     final stop = _stops[_selectedIndex];
     final result = await DriveTimeService.getDriveTime(
-      originLat: pos.latitude,
-      originLng: pos.longitude,
+      originLat: origin.latitude,
+      originLng: origin.longitude,
       destLat: stop.latitude,
       destLng: stop.longitude,
       destinationStopId: stop.id,
       destinationName: stop.name,
     );
     if (!mounted) return;
-    _lastDriveTimePosition = pos;
+    _lastDriveTimePosition = _position;
     _lastDriveTimeAt = DateTime.now();
     setState(() {
       _driveTime = result.duration;
@@ -304,11 +326,74 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     FavouritesService.save(_favourites);
   }
 
+  void _enterCustomOriginMode() {
+    if (_position == null) return;
+    setState(() {
+      _customOriginMode = true;
+      _customOrigin = null;
+      _driveTime = null;
+      _distanceMeters = null;
+      _routePoints = [];
+    });
+    _mapController?.animateCamera(CameraUpdate.newLatLngZoom(
+      LatLng(_position!.latitude, _position!.longitude), 9,
+    ));
+  }
+
+  void _exitCustomOriginMode() {
+    setState(() {
+      _customOriginMode = false;
+      _customOrigin = null;
+    });
+    if (_position != null) _loadStopsFor(_position!.latitude, _position!.longitude);
+  }
+
+  void _onMapTap(LatLng pos) {
+    if (!_customOriginMode) return;
+    setState(() => _customOrigin = pos);
+    _loadStopsFor(pos.latitude, pos.longitude);
+  }
+
   Future<void> _refreshDepartures() async {
     if (!_appActive || _stops.isEmpty) return;
-    final departures = await FerryService.departures(_stops[_selectedIndex].id);
+    final stopId = _stops[_selectedIndex].id;
+    final departures = await FerryService.departures(stopId);
     if (!mounted) return;
-    setState(() => _departures = departures);
+    setState(() {
+      _departures = departures;
+      final destinations = _distinctDestinations(departures);
+      if (destinations.length <= 1) {
+        _selectedDestination = null;
+      } else if (_selectedDestination == null ||
+          !destinations.contains(_selectedDestination)) {
+        final preferred = _destinationPrefs[stopId];
+        _selectedDestination = destinations.contains(preferred)
+            ? preferred
+            : departures.firstWhere((d) => d.destination != null).destination;
+      }
+    });
+  }
+
+  List<String> _distinctDestinations(List<Departure> departures) {
+    final seen = <String>{};
+    for (final d in departures) {
+      if (d.destination != null) seen.add(d.destination!);
+    }
+    return seen.toList();
+  }
+
+  void _selectDestination(String destination) {
+    final stopId = _stops[_selectedIndex].id;
+    setState(() {
+      _selectedDestination = destination;
+      _destinationPrefs[stopId] = destination;
+    });
+    DestinationPreferenceService.save(_destinationPrefs);
+  }
+
+  List<Departure> get _visibleDepartures {
+    if (_selectedDestination == null) return _departures;
+    return _departures.where((d) => d.destination == _selectedDestination).toList();
   }
 
   void _selectPort(int index) {
@@ -319,6 +404,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       _distanceMeters = null;
       _routePoints = [];
       _departures = [];
+      _selectedDestination = null;
     });
     _lastDriveTimeAt = null; // force immediate refresh for new port
     _zoomAfterRoute = true;
@@ -330,7 +416,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   Departure? get _nextDep {
     if (_driveTime == null) return null;
     final arrival = DateTime.now().add(_driveTime!);
-    for (final d in _departures) {
+    for (final d in _visibleDepartures) {
       if (!d.time.isBefore(arrival)) return d;
     }
     return null;
@@ -341,7 +427,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (_driveTime == null) return null;
     final arrival = DateTime.now().add(_driveTime!);
     Departure? last;
-    for (final d in _departures) {
+    for (final d in _visibleDepartures) {
       if (d.time.isBefore(arrival)) last = d;
     }
     return last;
@@ -353,7 +439,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   void _showDepartureSheet(BuildContext context) {
-    if (_stops.isEmpty || _departures.isEmpty) return;
+    if (_stops.isEmpty || _visibleDepartures.isEmpty) return;
     setState(() => _sheetOpen = true);
     _disableMapGestures();
     showModalBottomSheet(
@@ -365,7 +451,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       builder: (_) => PointerInterceptor(
         child: _DepartureSheet(
           stopName: _stops[_selectedIndex].name,
-          departures: _departures,
+          departures: _visibleDepartures,
           driveTime: _driveTime,
         ),
       ),
@@ -418,6 +504,17 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   infoWindow: const InfoWindow(title: 'Din posisjon'),
                   zIndexInt: 1,
                 ),
+              if (_customOrigin != null)
+                Marker(
+                  markerId: const MarkerId('_custom_origin'),
+                  position: _customOrigin!,
+                  icon: BitmapDescriptor.defaultMarkerWithHue(
+                      BitmapDescriptor.hueOrange),
+                  infoWindow: const InfoWindow(title: 'Startpunkt'),
+                  draggable: true,
+                  onDragEnd: _onMapTap,
+                  zIndexInt: 2,
+                ),
               for (int i = 0; i < _stops.length; i++)
                 Marker(
                   markerId: MarkerId(_stops[i].id),
@@ -434,6 +531,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                     LatLng(_position!.latitude, _position!.longitude), 13));
               }
             },
+            onTap: _onMapTap,
           ),
           if (_sheetOpen)
             Positioned.fill(
@@ -445,29 +543,39 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             right: 0,
             child: SafeArea(
               child: PointerInterceptor(
-                child: _StatsBar(
-                  stopName:
-                      _stops.isNotEmpty ? _stops[_selectedIndex].name : null,
-                  isFavourite: _stops.isNotEmpty &&
-                      _favourites.containsKey(_stops[_selectedIndex].id),
-                  onFavouriteToggle: _stops.isNotEmpty
-                      ? () => _toggleFavourite(_stops[_selectedIndex].id)
-                      : null,
-                  driveTime: _driveTime,
-                  distanceMeters: _distanceMeters,
-                  prevMargin: _marginFor(_prevDep),
-                  nextMargin: _marginFor(_nextDep),
-                  prevDeparture: _prevDep?.time,
-                  nextDeparture: _nextDep?.time,
-                  waitingForLocation: _position == null,
-                  loading: _loadingStops,
-                  onTap: () => _showDepartureSheet(context),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_customOriginMode)
+                      _CustomOriginBanner(
+                        picked: _customOrigin != null,
+                        onExit: _exitCustomOriginMode,
+                      ),
+                    _StatsBar(
+                      stopName: _stops.isNotEmpty
+                          ? _stops[_selectedIndex].name
+                          : null,
+                      isFavourite: _stops.isNotEmpty &&
+                          _favourites.containsKey(_stops[_selectedIndex].id),
+                      onFavouriteToggle: _stops.isNotEmpty
+                          ? () => _toggleFavourite(_stops[_selectedIndex].id)
+                          : null,
+                      driveTime: _driveTime,
+                      distanceMeters: _distanceMeters,
+                      prevMargin: _marginFor(_prevDep),
+                      nextMargin: _marginFor(_nextDep),
+                      prevDeparture: _prevDep?.time,
+                      nextDeparture: _nextDep?.time,
+                      waitingForLocation: _position == null,
+                      loading: _loadingStops,
+                      onTap: () => _showDepartureSheet(context),
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
-          if (_stops.length > 1)
-            Positioned(
+          Positioned(
               bottom: 0,
               left: 0,
               right: 0,
@@ -477,13 +585,25 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   onPointerUp: (_) => _enableMapGestures(),
                   onPointerCancel: (_) => _enableMapGestures(),
                   child: PointerInterceptor(
-                    child: _PortSwitcher(
-                      stops: _stops,
-                      selectedIndex: _selectedIndex,
-                      favourites: _favourites,
-                      onSelected: _selectPort,
-                      onInfo: () => _showInfoDialog(context),
-                      onFavourites: () => _showFavouritesSheet(context),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_distinctDestinations(_departures).length > 1)
+                          _DestinationSwitcher(
+                            destinations: _distinctDestinations(_departures),
+                            selected: _selectedDestination,
+                            onSelected: _selectDestination,
+                          ),
+                        _PortSwitcher(
+                          stops: _stops,
+                          selectedIndex: _selectedIndex,
+                          favourites: _favourites,
+                          onSelected: _selectPort,
+                          onInfo: () => _showInfoDialog(context),
+                          onFavourites: () => _showFavouritesSheet(context),
+                          onCustomOrigin: _enterCustomOriginMode,
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -502,6 +622,58 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               message: 'Omtrentlig posisjon (WiFi/mobilnett). Aktiver GPS for best nøyaktighet.',
               onDismiss: () => setState(() => _locationWarningDismissed = true),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Custom origin banner ────────────────────────────────────────────────────────
+
+class _CustomOriginBanner extends StatelessWidget {
+  const _CustomOriginBanner({required this.picked, required this.onExit});
+
+  final bool picked;
+  final VoidCallback onExit;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        color: const Color(0xE6111827),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFF97316), width: 1),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.location_on, color: Color(0xFFF97316), size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              picked
+                  ? 'Egendefinert startpunkt'
+                  : 'Trykk i kartet for å velge startpunkt',
+              style: const TextStyle(
+                  color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+            ),
+          ),
+          GestureDetector(
+            onTap: onExit,
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 4),
+              child: Text(
+                'Bruk enhetens posisjon',
+                style: TextStyle(
+                  color: Color(0xFF60A5FA),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  decoration: TextDecoration.underline,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -911,6 +1083,69 @@ class _DepartureSheet extends StatelessWidget {
   }
 }
 
+// ── Destination switcher ───────────────────────────────────────────────────────
+
+class _DestinationSwitcher extends StatelessWidget {
+  const _DestinationSwitcher({
+    required this.destinations,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final List<String> destinations;
+  final String? selected;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xE6111827),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      // Horizontally scrollable, content-sized chips — stays usable no
+      // matter how narrow the screen or how long the destination names are.
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (int i = 0; i < destinations.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () => onSelected(destinations[i]),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: destinations[i] == selected
+                        ? const Color(0xFF1D4ED8)
+                        : const Color(0xFF1F2937),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '→ ${destinations[i]}',
+                    style: TextStyle(
+                      color: destinations[i] == selected
+                          ? Colors.white
+                          : Colors.white60,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ── Port switcher ──────────────────────────────────────────────────────────────
 
 
@@ -922,6 +1157,7 @@ class _PortSwitcher extends StatelessWidget {
     required this.onSelected,
     required this.onInfo,
     required this.onFavourites,
+    required this.onCustomOrigin,
   });
 
   final List<FerryStop> stops;
@@ -930,6 +1166,7 @@ class _PortSwitcher extends StatelessWidget {
   final ValueChanged<int> onSelected;
   final VoidCallback onInfo;
   final VoidCallback onFavourites;
+  final VoidCallback onCustomOrigin;
 
   @override
   Widget build(BuildContext context) {
@@ -1018,6 +1255,7 @@ class _PortSwitcher extends StatelessWidget {
             onSelected: (value) {
               if (value == 'info') onInfo();
               if (value == 'favourites') onFavourites();
+              if (value == 'custom_origin') onCustomOrigin();
               if (value == 'coffee') {
                 web.window.open('https://buymeacoffee.com/amundmr', '_blank');
               }
@@ -1037,6 +1275,14 @@ class _PortSwitcher extends StatelessWidget {
                   const Icon(Icons.star_outline, color: Colors.white70, size: 18),
                   const SizedBox(width: 10),
                   const Text('Favoritter', style: TextStyle(color: Colors.white)),
+                ]),
+              ),
+              PopupMenuItem(
+                value: 'custom_origin',
+                child: Row(children: [
+                  const Icon(Icons.location_searching, color: Colors.white70, size: 18),
+                  const SizedBox(width: 10),
+                  const Text('Egendefinert startpunkt', style: TextStyle(color: Colors.white)),
                 ]),
               ),
               PopupMenuItem(
