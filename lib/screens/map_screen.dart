@@ -20,6 +20,24 @@ external void _disableMapGestures();
 @JS('enableMapGestures')
 external void _enableMapGestures();
 
+// Every piece of UI stacked on top of the GoogleMap must be wrapped in this,
+// to stop panning/scrolling gestures on the UI (e.g. scrolling the departure
+// sheet) from being misread as dragging the map underneath.
+class _MapOverlay extends StatelessWidget {
+  const _MapOverlay({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (_) => _disableMapGestures(),
+      onPointerUp: (_) => _enableMapGestures(),
+      onPointerCancel: (_) => _enableMapGestures(),
+      child: PointerInterceptor(child: child),
+    );
+  }
+}
+
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
   @override
@@ -39,6 +57,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   String? _selectedDestination;
   bool _customOriginMode = false;
   LatLng? _customOrigin;
+  bool _suppressNextCameraIdle = false;
   bool _loadingStops = false;
   bool _centeredOnUser = false;
   bool _sheetOpen = false;
@@ -169,7 +188,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     });
     if (!_centeredOnUser && _mapController != null) {
       _centeredOnUser = true;
-      _mapController!.animateCamera(
+      _animateCamera(
         CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 10),
       );
     }
@@ -178,6 +197,41 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     } else if (_stops.isNotEmpty && _shouldRefreshDriveTime(pos)) {
       _refreshDriveTime();
     }
+  }
+
+  // Every programmatic camera move must go through this so `_onCameraIdle`
+  // can tell the difference between "we moved the camera" and "the user
+  // dragged the map" — only the latter should update the custom origin.
+  void _animateCamera(CameraUpdate update) {
+    _suppressNextCameraIdle = true;
+    _mapController?.animateCamera(update);
+  }
+
+  // Uber-style pin picker: a crosshair sits fixed at the screen center and
+  // the map moves underneath it. This deliberately has no GoogleMap.onTap —
+  // a tap-to-drop-pin approach was tried and abandoned because taps on UI
+  // stacked above the map could reach the map's own click listener in
+  // parallel with the UI handling them (a Flutter Web platform-view
+  // limitation), causing UI presses to also relocate the pin. Driving pin
+  // placement from camera position instead removes that failure mode
+  // entirely, since there is no map click handler left for a leaked click
+  // to trigger.
+  Future<void> _onCameraIdle() async {
+    if (_suppressNextCameraIdle) {
+      _suppressNextCameraIdle = false;
+      return;
+    }
+    if (!_customOriginMode) return;
+    final controller = _mapController;
+    if (controller == null || !mounted) return;
+    final size = MediaQuery.of(context).size;
+    final center = await controller.getLatLng(ScreenCoordinate(
+      x: (size.width / 2).round(),
+      y: (size.height / 2).round(),
+    ));
+    if (!mounted || !_customOriginMode) return;
+    setState(() => _customOrigin = center);
+    _loadStopsFor(center.latitude, center.longitude);
   }
 
   Future<void> _loadStops() async {
@@ -252,7 +306,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       _distanceMeters = result.distanceMeters;
       _routePoints = result.route;
     });
-    if (_zoomAfterRoute) {
+    // Skip while picking a custom origin — moving the camera to fit the
+    // route would carry the crosshair away from the point just chosen.
+    if (_zoomAfterRoute && !_customOriginMode) {
       _zoomAfterRoute = false;
       _zoomToFitRoute();
     }
@@ -274,7 +330,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     // padding parameter which doesn't work consistently on Flutter Web.
     final latPad = (maxLat - minLat) * 0.15;
     final lngPad = (maxLng - minLng) * 0.15;
-    _mapController!.animateCamera(CameraUpdate.newLatLngBounds(
+    _animateCamera(CameraUpdate.newLatLngBounds(
       LatLngBounds(
         southwest: LatLng(minLat - latPad, minLng - lngPad),
         northeast: LatLng(maxLat + latPad, maxLng + lngPad),
@@ -343,16 +399,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   void _enterCustomOriginMode() {
     if (_position == null) return;
+    final origin = LatLng(_position!.latitude, _position!.longitude);
     setState(() {
       _customOriginMode = true;
-      _customOrigin = null;
-      _driveTime = null;
-      _distanceMeters = null;
-      _routePoints = [];
+      _customOrigin = origin;
     });
-    _mapController?.animateCamera(CameraUpdate.newLatLngZoom(
-      LatLng(_position!.latitude, _position!.longitude), 9,
-    ));
+    _animateCamera(CameraUpdate.newLatLngZoom(origin, 9));
+    _loadStopsFor(origin.latitude, origin.longitude);
   }
 
   void _exitCustomOriginMode() {
@@ -361,12 +414,6 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       _customOrigin = null;
     });
     if (_position != null) _loadStopsFor(_position!.latitude, _position!.longitude);
-  }
-
-  void _onMapTap(LatLng pos) {
-    if (!_customOriginMode) return;
-    setState(() => _customOrigin = pos);
-    _loadStopsFor(pos.latitude, pos.longitude);
   }
 
   Future<void> _refreshDepartures() async {
@@ -519,17 +566,6 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   infoWindow: const InfoWindow(title: 'Din posisjon'),
                   zIndexInt: 1,
                 ),
-              if (_customOrigin != null)
-                Marker(
-                  markerId: const MarkerId('_custom_origin'),
-                  position: _customOrigin!,
-                  icon: BitmapDescriptor.defaultMarkerWithHue(
-                      BitmapDescriptor.hueOrange),
-                  infoWindow: const InfoWindow(title: 'Startpunkt'),
-                  draggable: true,
-                  onDragEnd: _onMapTap,
-                  zIndexInt: 2,
-                ),
               for (int i = 0; i < _stops.length; i++)
                 Marker(
                   markerId: MarkerId(_stops[i].id),
@@ -542,12 +578,18 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               _mapController = controller;
               if (_position != null && !_centeredOnUser) {
                 _centeredOnUser = true;
-                controller.animateCamera(CameraUpdate.newLatLngZoom(
+                _animateCamera(CameraUpdate.newLatLngZoom(
                     LatLng(_position!.latitude, _position!.longitude), 13));
               }
             },
-            onTap: _onMapTap,
+            onCameraIdle: _onCameraIdle,
           ),
+          if (_customOriginMode)
+            const IgnorePointer(
+              child: Center(
+                child: _CustomOriginCrosshair(),
+              ),
+            ),
           if (_sheetOpen)
             Positioned.fill(
               child: PointerInterceptor(child: const SizedBox.expand()),
@@ -557,13 +599,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             left: 0,
             right: 0,
             child: SafeArea(
-              child: PointerInterceptor(
+              child: _MapOverlay(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (_customOriginMode)
                       _CustomOriginBanner(
-                        picked: _customOrigin != null,
                         onExit: _exitCustomOriginMode,
                       ),
                     _StatsBar(
@@ -595,32 +636,27 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               left: 0,
               right: 0,
               child: SafeArea(
-                child: Listener(
-                  onPointerDown: (_) => _disableMapGestures(),
-                  onPointerUp: (_) => _enableMapGestures(),
-                  onPointerCancel: (_) => _enableMapGestures(),
-                  child: PointerInterceptor(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (_distinctDestinations(_departures).length > 1)
-                          _DestinationSwitcher(
-                            destinations: _distinctDestinations(_departures),
-                            selected: _selectedDestination,
-                            onSelected: _selectDestination,
-                          ),
-                        _PortSwitcher(
-                          stops: _stops,
-                          selectedIndex: _selectedIndex,
-                          favourites: _favourites,
-                          onSelected: _selectPort,
-                          onInfo: () => _showInfoDialog(context),
-                          onFavourites: () => _showFavouritesSheet(context),
-                          onCustomOrigin: _enterCustomOriginMode,
-                          onNavigate: _openNavigation,
+                child: _MapOverlay(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_distinctDestinations(_departures).length > 1)
+                        _DestinationSwitcher(
+                          destinations: _distinctDestinations(_departures),
+                          selected: _selectedDestination,
+                          onSelected: _selectDestination,
                         ),
-                      ],
-                    ),
+                      _PortSwitcher(
+                        stops: _stops,
+                        selectedIndex: _selectedIndex,
+                        favourites: _favourites,
+                        onSelected: _selectPort,
+                        onInfo: () => _showInfoDialog(context),
+                        onFavourites: () => _showFavouritesSheet(context),
+                        onCustomOrigin: _enterCustomOriginMode,
+                        onNavigate: _openNavigation,
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -647,9 +683,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 // ── Custom origin banner ────────────────────────────────────────────────────────
 
 class _CustomOriginBanner extends StatelessWidget {
-  const _CustomOriginBanner({required this.picked, required this.onExit});
+  const _CustomOriginBanner({required this.onExit});
 
-  final bool picked;
   final VoidCallback onExit;
 
   @override
@@ -666,12 +701,10 @@ class _CustomOriginBanner extends StatelessWidget {
         children: [
           const Icon(Icons.location_on, color: Color(0xFFF97316), size: 18),
           const SizedBox(width: 10),
-          Expanded(
+          const Expanded(
             child: Text(
-              picked
-                  ? 'Egendefinert startpunkt'
-                  : 'Trykk i kartet for å velge startpunkt',
-              style: const TextStyle(
+              'Dra kartet for å velge startpunkt',
+              style: TextStyle(
                   color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
             ),
           ),
@@ -690,6 +723,27 @@ class _CustomOriginBanner extends StatelessWidget {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CustomOriginCrosshair extends StatelessWidget {
+  const _CustomOriginCrosshair();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      // Optically center the pin's tip (not its bounding box) on the
+      // screen center, since the map's own center point sits there.
+      padding: const EdgeInsets.only(bottom: 36),
+      child: Icon(
+        Icons.location_on,
+        color: const Color(0xFFF97316),
+        size: 40,
+        shadows: [
+          Shadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 6),
         ],
       ),
     );
@@ -718,7 +772,8 @@ class _LocationBanner extends StatelessWidget {
       left: 0,
       right: 0,
       child: SafeArea(
-        child: Container(
+        child: _MapOverlay(
+          child: Container(
           margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
           decoration: BoxDecoration(
@@ -746,6 +801,7 @@ class _LocationBanner extends StatelessWidget {
               ],
             ],
           ),
+        ),
         ),
       ),
     );
@@ -1270,7 +1326,13 @@ class _PortSwitcher extends StatelessWidget {
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: Colors.white54, size: 22),
             color: const Color(0xFF1F2937),
+            // The menu renders in the root Overlay, outside any
+            // PointerInterceptor subtree, so it needs its own map-gesture
+            // guard rather than inheriting one from an ancestor.
+            onOpened: () => _disableMapGestures(),
+            onCanceled: () => _enableMapGestures(),
             onSelected: (value) {
+              _enableMapGestures();
               if (value == 'navigate') onNavigate();
               if (value == 'info') onInfo();
               if (value == 'favourites') onFavourites();
@@ -1350,7 +1412,7 @@ class _InfoDialog extends StatelessWidget {
             'Avgangstider hentes fra Entur. Kjøretid beregnes via Google Maps '
             'Routes API. Hostet på Cloudflare Pages.\n\n'
             'Laget av Amund Raniseth.\n\n'
-            'Versjon 1.0.0',
+            'Versjon 1.1.0',
             style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
           ),
           const SizedBox(height: 14),
