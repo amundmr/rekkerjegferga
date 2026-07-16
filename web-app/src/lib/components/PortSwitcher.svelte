@@ -1,13 +1,16 @@
 <script lang="ts">
+	import { Star } from 'lucide-svelte';
 	import { formatDistance, type FerryStop } from '$lib/types';
 
 	let {
 		stops,
 		selectedIndex,
+		favourites,
 		onselect
 	}: {
 		stops: FerryStop[];
 		selectedIndex: number;
+		favourites: Record<string, string>;
 		onselect: (index: number) => void;
 	} = $props();
 </script>
@@ -15,7 +18,12 @@
 <div class="switcher">
 	{#each stops as stop, i (stop.id)}
 		<button class="chip" class:selected={i === selectedIndex} onclick={() => onselect(i)}>
-			<span class="name">{stop.name}</span>
+			<span class="name-row">
+				{#if favourites[stop.id]}
+					<Star size={11} fill="currentColor" />
+				{/if}
+				<span class="name">{stop.name}</span>
+			</span>
 			<span class="distance">{formatDistance(stop.distanceMeters)}</span>
 		</button>
 	{/each}
@@ -48,6 +56,15 @@
 		color: white;
 	}
 
+	.name-row {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 3px;
+		color: inherit;
+		opacity: 0.7;
+	}
+
 	.name {
 		display: block;
 		font-size: 12px;
@@ -55,6 +72,8 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+		opacity: 1;
+		color: inherit;
 	}
 
 	.distance {

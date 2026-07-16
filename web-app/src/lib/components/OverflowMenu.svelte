@@ -1,7 +1,17 @@
 <script lang="ts">
-	import { Info, LocateFixed, MoreVertical } from 'lucide-svelte';
+	import { Info, LocateFixed, MoreVertical, Navigation, Star } from 'lucide-svelte';
 
-	let { oninfo, oncustomorigin }: { oninfo: () => void; oncustomorigin: () => void } = $props();
+	let {
+		oninfo,
+		oncustomorigin,
+		onfavourites,
+		onnavigate
+	}: {
+		oninfo: () => void;
+		oncustomorigin: () => void;
+		onfavourites: () => void;
+		onnavigate: () => void;
+	} = $props();
 
 	let open = $state(false);
 
@@ -22,9 +32,17 @@
 	{#if open}
 		<div class="backdrop" onclick={() => (open = false)} role="presentation"></div>
 		<div class="menu" role="menu">
+			<button class="item" role="menuitem" onclick={() => pick(onnavigate)}>
+				<Navigation size={18} />
+				<span>Naviger dit</span>
+			</button>
 			<button class="item" role="menuitem" onclick={() => pick(oninfo)}>
 				<Info size={18} />
 				<span>Info</span>
+			</button>
+			<button class="item" role="menuitem" onclick={() => pick(onfavourites)}>
+				<Star size={18} />
+				<span>Favoritter</span>
 			</button>
 			<button class="item" role="menuitem" onclick={() => pick(oncustomorigin)}>
 				<LocateFixed size={18} />

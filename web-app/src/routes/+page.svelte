@@ -1,14 +1,18 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { Car, ChevronDown, MapPin } from 'lucide-svelte';
+	import { Car, ChevronDown, MapPin, Star } from 'lucide-svelte';
 	import GoogleMap from '$lib/components/GoogleMap.svelte';
 	import DepartureSheet from '$lib/components/DepartureSheet.svelte';
 	import PortSwitcher from '$lib/components/PortSwitcher.svelte';
 	import OverflowMenu from '$lib/components/OverflowMenu.svelte';
 	import InfoDialog from '$lib/components/InfoDialog.svelte';
 	import CustomOriginBanner from '$lib/components/CustomOriginBanner.svelte';
+	import FavouritesSheet from '$lib/components/FavouritesSheet.svelte';
+	import DestinationSwitcher from '$lib/components/DestinationSwitcher.svelte';
 	import * as ferryService from '$lib/services/ferry';
 	import * as driveTimeService from '$lib/services/driveTime';
+	import * as favouritesService from '$lib/services/favourites';
+	import * as destinationPreferenceService from '$lib/services/destinationPreference';
 	import type { Departure, FerryStop, LatLng } from '$lib/types';
 
 	const MY_LOCATION_ICON =
@@ -31,6 +35,11 @@
 
 	let sheetOpen = $state(false);
 	let infoOpen = $state(false);
+	let favouritesOpen = $state(false);
+
+	let favourites = $state<Record<string, string>>({});
+	let destinationPrefs: Record<string, string> = {};
+	let selectedDestination = $state<string | null>(null);
 
 	let position = $state<LatLng | null>(null);
 	let locationError = $state<string | null>(null);
@@ -67,11 +76,28 @@
 		return () => clearInterval(ticker);
 	});
 
+	onMount(() => {
+		favourites = favouritesService.load();
+		destinationPrefs = destinationPreferenceService.load();
+	});
+
 	let arrival = $derived(driveTimeSeconds !== null ? now + driveTimeSeconds * 1000 : null);
+
+	let distinctDestinations = $derived.by((): string[] => {
+		const seen = new Set<string>();
+		for (const d of departures) if (d.destination) seen.add(d.destination);
+		return [...seen];
+	});
+
+	let visibleDepartures = $derived(
+		selectedDestination === null
+			? departures
+			: departures.filter((d) => d.destination === selectedDestination)
+	);
 
 	let nextDep = $derived.by((): Departure | null => {
 		if (arrival === null) return null;
-		for (const d of departures) {
+		for (const d of visibleDepartures) {
 			if (d.time.getTime() >= arrival) return d;
 		}
 		return null;
@@ -80,7 +106,7 @@
 	let prevDep = $derived.by((): Departure | null => {
 		if (arrival === null) return null;
 		let last: Departure | null = null;
-		for (const d of departures) {
+		for (const d of visibleDepartures) {
 			if (d.time.getTime() < arrival) last = d;
 		}
 		return last;
@@ -113,16 +139,51 @@
 		return `${h}h ${m}m`;
 	}
 
+	function sortStops(list: FerryStop[]): FerryStop[] {
+		return [...list].sort((a, b) => {
+			const aFav = a.id in favourites;
+			const bFav = b.id in favourites;
+			if (aFav !== bFav) return aFav ? -1 : 1;
+			return a.distanceMeters - b.distanceMeters;
+		});
+	}
+
 	async function loadStopsFor(lat: number, lng: number) {
 		loadingStops = true;
 		const result = await ferryService.nearbyStops(lat, lng);
-		stops = [...result].sort((a, b) => a.distanceMeters - b.distanceMeters);
+		stops = sortStops(result);
 		selectedIndex = 0;
 		loadingStops = false;
 		if (stops.length > 0) {
 			refreshDriveTime();
 			refreshDepartures();
 		}
+	}
+
+	function toggleFavourite(stopId: string) {
+		const stop = stops.find((s) => s.id === stopId);
+		if (!stop) return;
+		const updated = { ...favourites };
+		if (stopId in updated) {
+			delete updated[stopId];
+		} else {
+			updated[stopId] = stop.name;
+		}
+		favourites = updated;
+		favouritesService.save(favourites);
+		const selectedId = selectedStop?.id;
+		stops = sortStops(stops);
+		if (selectedId) selectedIndex = stops.findIndex((s) => s.id === selectedId);
+	}
+
+	function removeFavourite(stopId: string) {
+		const updated = { ...favourites };
+		delete updated[stopId];
+		favourites = updated;
+		favouritesService.save(favourites);
+		const selectedId = selectedStop?.id;
+		stops = sortStops(stops);
+		if (selectedId) selectedIndex = stops.findIndex((s) => s.id === selectedId);
 	}
 
 	async function refreshDriveTime() {
@@ -145,7 +206,37 @@
 	async function refreshDepartures() {
 		const stop = selectedStop;
 		if (!stop) return;
-		departures = await ferryService.departures(stop.id);
+		const result = await ferryService.departures(stop.id);
+		departures = result;
+		const destinations = [...new Set(result.map((d) => d.destination).filter((d) => d !== null))];
+		if (destinations.length <= 1) {
+			selectedDestination = null;
+		} else if (selectedDestination === null || !destinations.includes(selectedDestination)) {
+			const preferred = destinationPrefs[stop.id];
+			selectedDestination = preferred && destinations.includes(preferred) ? preferred : result[0]?.destination ?? null;
+		}
+	}
+
+	function selectDestination(destination: string) {
+		const stop = selectedStop;
+		if (!stop) return;
+		selectedDestination = destination;
+		destinationPrefs = { ...destinationPrefs, [stop.id]: destination };
+		destinationPreferenceService.save(destinationPrefs);
+	}
+
+	function openNavigation() {
+		const stop = selectedStop;
+		if (!stop) return;
+		// Prefer the last point of the computed route — it reflects the
+		// Places-resolved arrival coordinate from the gateway, which is often
+		// more accurate than Entur's raw quay coordinate.
+		const dest = route.length > 0 ? route[route.length - 1] : { lat: stop.latitude, lng: stop.longitude };
+		const url =
+			'https://www.google.com/maps/dir/?api=1' +
+			`&destination=${dest.lat},${dest.lng}` +
+			'&travelmode=driving&dir_action=navigate';
+		window.open(url, '_blank');
 	}
 
 	function selectStop(index: number) {
@@ -155,6 +246,7 @@
 		distanceMeters = null;
 		route = [];
 		departures = [];
+		selectedDestination = null;
 		refreshDriveTime();
 		refreshDepartures();
 	}
@@ -306,10 +398,15 @@
 			<CustomOriginBanner placed={originPlaced} onexit={exitCustomOriginMode} />
 		{/if}
 
-		<button
+		<div
 			class="stats-bar"
+			role="button"
+			tabindex="0"
 			onclick={() => {
 				if (selectedStop) sheetOpen = true;
+			}}
+			onkeydown={(e) => {
+				if ((e.key === 'Enter' || e.key === ' ') && selectedStop) sheetOpen = true;
 			}}
 		>
 			{#if selectedStop}
@@ -319,6 +416,20 @@
 			<p class="loading">{!position ? 'Henter posisjon…' : 'Søker etter ferger…'}</p>
 		{:else if selectedStop}
 			<div class="stop-name-row">
+				<button
+					class="favourite-toggle"
+					onclick={(e) => {
+						e.stopPropagation();
+						toggleFavourite(selectedStop!.id);
+					}}
+					aria-label="Favoritt"
+				>
+					<Star
+						size={18}
+						color={favourites[selectedStop.id] ? '#fbbf24' : 'rgba(255,255,255,0.38)'}
+						fill={favourites[selectedStop.id] ? '#fbbf24' : 'none'}
+					/>
+				</button>
 				<span class="stop-name">{selectedStop.name}</span>
 				<span class="drive-time">
 					<Car class="car-icon" size={14} aria-hidden="true" />
@@ -338,7 +449,7 @@
 		{:else}
 			<p class="loading">Fant ingen fergekaier i nærheten.</p>
 		{/if}
-		</button>
+		</div>
 	</div>
 
 	{#if locationError}
@@ -357,9 +468,21 @@
 			{#if customOriginMode && !originPlaced}
 				<button class="place-pin" onclick={placeCustomOrigin}>Plasser nål</button>
 			{/if}
+			{#if distinctDestinations.length > 1}
+				<DestinationSwitcher
+					destinations={distinctDestinations}
+					selected={selectedDestination}
+					onselect={selectDestination}
+				/>
+			{/if}
 			<div class="bottom-bar">
-				<PortSwitcher {stops} {selectedIndex} onselect={selectStop} />
-				<OverflowMenu oninfo={() => (infoOpen = true)} oncustomorigin={enterCustomOriginMode} />
+				<PortSwitcher {stops} {selectedIndex} {favourites} onselect={selectStop} />
+				<OverflowMenu
+					oninfo={() => (infoOpen = true)}
+					oncustomorigin={enterCustomOriginMode}
+					onfavourites={() => (favouritesOpen = true)}
+					onnavigate={openNavigation}
+				/>
 			</div>
 		</div>
 	{/if}
@@ -367,7 +490,7 @@
 	{#if sheetOpen && selectedStop}
 		<DepartureSheet
 			stopName={selectedStop.name}
-			{departures}
+			departures={visibleDepartures}
 			{driveTimeSeconds}
 			onclose={() => (sheetOpen = false)}
 		/>
@@ -375,6 +498,14 @@
 
 	{#if infoOpen}
 		<InfoDialog onclose={() => (infoOpen = false)} />
+	{/if}
+
+	{#if favouritesOpen}
+		<FavouritesSheet
+			{favourites}
+			onremove={removeFavourite}
+			onclose={() => (favouritesOpen = false)}
+		/>
 	{/if}
 </div>
 
@@ -509,6 +640,15 @@
 		align-items: center;
 		gap: 8px;
 		padding-right: 20px;
+	}
+
+	.favourite-toggle {
+		background: none;
+		border: none;
+		padding: 0;
+		display: flex;
+		cursor: pointer;
+		flex-shrink: 0;
 	}
 
 	.stop-name {
