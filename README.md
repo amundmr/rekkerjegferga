@@ -4,15 +4,16 @@ Sanntids ferge-kalkulator for Norge. Viser kjøretid til nærmeste fergekai og m
 
 ## Stack
 
-- **Frontend:** Flutter Web (Cloudflare Pages)
-- **Backend:** Cloudflare Worker (`/gateway`) — proxyer Google Routes API
+- **Frontend:** SvelteKit + TypeScript, statisk bygget (`@sveltejs/adapter-static`), hostet på Cloudflare Pages (`/web-app`)
+- **Backend:** Cloudflare Worker (`/gateway`) — proxyer Google Routes API, løser fergekai-koordinater via Places API (KV-cachet)
 - **Fergedata:** Entur Journey Planner GraphQL API
 - **Kart:** Google Maps JavaScript API
 
 ## Lokal utvikling
 
+Frontend (fra `/web-app`):
 ```bash
-flutter run -d web-server --web-port 8080 --web-hostname localhost
+npm run dev
 ```
 
 Worker lokalt (fra `/gateway`):
@@ -20,7 +21,7 @@ Worker lokalt (fra `/gateway`):
 npx wrangler dev
 ```
 
-Husk å bytte `_baseUrl` i `lib/services/drive_time_service.dart` til `http://localhost:8787` for lokal Worker-testing.
+Husk å bytte `BASE_URL` i `web-app/src/lib/services/driveTime.ts` til `http://localhost:8787` for lokal Worker-testing.
 
 ## Miljøer
 
@@ -38,16 +39,16 @@ Husk å bytte `_baseUrl` i `lib/services/drive_time_service.dart` til `http://lo
 
 ## Deploy
 
-Dev (→ dev.rekkerjegferga.pages.dev):
+Dev (→ dev.rekkerjegferga.pages.dev), fra `/web-app`:
 ```bash
-flutter build web --release --base-href /
-npx wrangler pages deploy build/web --project-name rekkerjegferga --branch dev
+npm run build
+npx wrangler pages deploy build --project-name rekkerjegferga --branch dev
 ```
 
-Prod (→ rekkerjegferga.pages.dev):
+Prod (→ rekkerjegferga.pages.dev), fra `/web-app`:
 ```bash
-flutter build web --release --base-href /
-npx wrangler pages deploy build/web --project-name rekkerjegferga --branch main
+npm run build
+npx wrangler pages deploy build --project-name rekkerjegferga --branch main
 ```
 
 Worker-deploy (fra `/gateway`):
@@ -62,9 +63,13 @@ npx wrangler secret put GOOGLE_MAPS_API_KEY
 
 ## API-nøkler
 
-- **Maps JS API-nøkkel** (frontend) — ligger i `web/index.html`, begrenset til `*.rekkerjegferga.pages.dev/*` i Google Cloud Console
+- **Maps JS API-nøkkel** (frontend) — ligger i `web-app/src/app.html`, begrenset til `*.rekkerjegferga.pages.dev/*` i Google Cloud Console
 - **Routes API-nøkkel** (backend) — lagret som Wrangler secret `GOOGLE_MAPS_API_KEY`, kun Routes API aktivert, ingen referrer-begrensning
 
 ## Kjente/pågående problemer
 
-- **Entur `nearest()` mangler enkelte fergekaier i nærhets-søket.** Eksempel: fra Skei (61.5392092, 6.4406246) returnerer Enturs `nearest`-spørring aldri "Hella ferjekai" (`NSR:StopPlace:58324`, ~38 km unna), verken med `filterByModes: [water]` eller helt ufiltrert — testet med en uttømmende, ikke-avkuttet radius på 45 km (431 treff, siste i 44 972 m) uten at Hella dukker opp. Stedet finnes og har korrekt data (bl.a. `localCarFerry`-kai) når det hentes direkte via `stopPlace(id: ...)`, så det er stedet selv som mangler i Enturs nærhetsindeks — ikke noe som kan løses med spørringsparametre på vår side. Appen viser i stedet "Dragsvik ferjekai" (~88 km unna), som ruten uansett må passere gjennom Hella-Dragsvik-fergen for å nå, og gir dermed helt feil kjøretid/margin. Bør meldes til Entur. Se `lib/services/ferry_service.dart` `nearbyStops()`.
+- **Entur `nearest()` mangler enkelte fergekaier i nærhets-søket.** Eksempel: fra Skei (61.5392092, 6.4406246) returnerer Enturs `nearest`-spørring aldri "Hella ferjekai" (`NSR:StopPlace:58324`, ~38 km unna), verken med `filterByModes: [water]` eller helt ufiltrert — testet med en uttømmende, ikke-avkuttet radius på 45 km (431 treff, siste i 44 972 m) uten at Hella dukker opp. Stedet finnes og har korrekt data (bl.a. `localCarFerry`-kai) når det hentes direkte via `stopPlace(id: ...)`, så det er stedet selv som mangler i Enturs nærhetsindeks — ikke noe som kan løses med spørringsparametre på vår side. Appen viser i stedet "Dragsvik ferjekai" (~88 km unna), som ruten uansett må passere gjennom Hella-Dragsvik-fergen for å nå, og gir dermed helt feil kjøretid/margin. Bør meldes til Entur. Se `web-app/src/lib/services/ferry.ts` `nearbyStops()`.
+
+## Historikk
+
+Appen var opprinnelig skrevet i Flutter Web. Den koden finnes bevart på branchen `flutter-legacy`.
