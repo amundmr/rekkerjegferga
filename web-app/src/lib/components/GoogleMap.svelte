@@ -14,13 +14,15 @@
 		zoom,
 		markers = [],
 		route = null,
-		onready
+		onready,
+		oncameraidle
 	}: {
 		center: LatLng;
 		zoom: number;
 		markers?: MarkerSpec[];
 		route?: LatLng[] | null;
 		onready?: (map: google.maps.Map) => void;
+		oncameraidle?: () => void;
 	} = $props();
 
 	let mapDiv: HTMLDivElement;
@@ -36,6 +38,7 @@
 				disableDefaultUI: true,
 				gestureHandling: 'greedy'
 			});
+			map.addListener('idle', () => oncameraidle?.());
 			onready?.(map);
 		}
 	});
@@ -89,6 +92,11 @@
 
 	export function getMap(): google.maps.Map | undefined {
 		return map;
+	}
+
+	export function getCenter(): LatLng | undefined {
+		const c = map?.getCenter();
+		return c ? { lat: c.lat(), lng: c.lng() } : undefined;
 	}
 </script>
 

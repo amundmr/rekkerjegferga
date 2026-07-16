@@ -15,6 +15,11 @@ export function isPast(departure: Departure): boolean {
 	return departure.time.getTime() < Date.now();
 }
 
+export function formatDistance(meters: number): string {
+	if (meters < 1000) return `${Math.round(meters)} m`;
+	return `${(meters / 1000).toFixed(1)} km`;
+}
+
 export interface LatLng {
 	lat: number;
 	lng: number;
