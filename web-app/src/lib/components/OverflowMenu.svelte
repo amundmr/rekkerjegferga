@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Info, LocateFixed, MoreVertical, Navigation, Star } from 'lucide-svelte';
+	import { Coffee, Info, LocateFixed, MoreVertical, Navigation, Star } from 'lucide-svelte';
 
 	let {
 		oninfo,
@@ -47,6 +47,14 @@
 			<button class="item" role="menuitem" onclick={() => pick(oncustomorigin)}>
 				<LocateFixed size={18} />
 				<span>Egendefinert startpunkt</span>
+			</button>
+			<button
+				class="item"
+				role="menuitem"
+				onclick={() => pick(() => window.open('https://buymeacoffee.com/amundmr', '_blank'))}
+			>
+				<Coffee size={18} />
+				<span>Spander en kaffe ☕</span>
 			</button>
 		</div>
 	{/if}

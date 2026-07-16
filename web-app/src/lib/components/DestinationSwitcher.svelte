@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { ArrowRight } from 'lucide-svelte';
+
 	let {
 		destinations,
 		selected,
@@ -17,7 +19,8 @@
 			class:selected={destination === selected}
 			onclick={() => onselect(destination)}
 		>
-			→ {destination}
+			<ArrowRight size={13} />
+			{destination}
 		</button>
 	{/each}
 </div>
@@ -34,6 +37,9 @@
 
 	.chip {
 		flex: 0 0 auto;
+		display: flex;
+		align-items: center;
+		gap: 5px;
 		padding: 8px 14px;
 		background: #1f2937;
 		border: none;

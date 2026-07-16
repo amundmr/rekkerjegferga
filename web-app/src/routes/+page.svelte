@@ -286,7 +286,10 @@
 		originPlaced = false;
 		customOrigin = null;
 		pendingOrigin = null;
-		if (position) loadStopsFor(position.lat, position.lng);
+		if (position) {
+			animateCamera(position, 13);
+			loadStopsFor(position.lat, position.lng);
+		}
 	}
 
 	function onCameraIdle() {
