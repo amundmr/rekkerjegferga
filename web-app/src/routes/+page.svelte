@@ -412,6 +412,17 @@
 	{/if}
 
 	<div class="top-stack">
+		{#if locationError}
+			<div class="location-banner error">
+				<span>{locationError}</span>
+			</div>
+		{:else if usingApproximateLocation && !locationWarningDismissed}
+			<div class="location-banner warning">
+				<span>Omtrentlig posisjon (WiFi/nettverk). Aktiver GPS for best nøyaktighet.</span>
+				<button onclick={() => (locationWarningDismissed = true)} aria-label="Lukk">✕</button>
+			</div>
+		{/if}
+
 		{#if customOriginMode}
 			<CustomOriginBanner placed={originPlaced} onexit={exitCustomOriginMode} />
 		{/if}
@@ -469,17 +480,6 @@
 		{/if}
 		</div>
 	</div>
-
-	{#if locationError}
-		<div class="location-banner error">
-			<span>{locationError}</span>
-		</div>
-	{:else if usingApproximateLocation && !locationWarningDismissed}
-		<div class="location-banner warning">
-			<span>Omtrentlig posisjon (WiFi/nettverk). Aktiver GPS for best nøyaktighet.</span>
-			<button onclick={() => (locationWarningDismissed = true)} aria-label="Lukk">✕</button>
-		</div>
-	{/if}
 
 	{#if position}
 		<div class="bottom-stack">
@@ -618,10 +618,6 @@
 	}
 
 	.location-banner {
-		position: absolute;
-		top: 12px;
-		left: 12px;
-		right: 12px;
 		display: flex;
 		align-items: center;
 		gap: 10px;
@@ -630,7 +626,6 @@
 		color: white;
 		font-size: 13px;
 		font-weight: 500;
-		z-index: 5;
 	}
 
 	.location-banner span {
