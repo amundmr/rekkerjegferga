@@ -24,6 +24,12 @@
 				'</svg>'
 		);
 
+	// Shown centered/zoomed to fit all of Norway when geolocation fails
+	// entirely, so the app is still usable via "Egendefinert startpunkt"
+	// rather than being stuck unusable with no map at all.
+	const NORWAY_FALLBACK: LatLng = { lat: 64.5, lng: 13.5 };
+	const NORWAY_ZOOM = 4;
+
 	const CUSTOM_ORIGIN_ICON =
 		'data:image/svg+xml;charset=UTF-8,' +
 		encodeURIComponent(
@@ -311,9 +317,18 @@
 		if (stops.length === 0 && !loadingStops) loadStopsFor(position.lat, position.lng);
 	}
 
+	// Falls back to a whole-of-Norway map view so the app stays usable (via
+	// "Egendefinert startpunkt") even when geolocation fails outright, rather
+	// than showing nothing at all.
+	function showLocationUnavailable() {
+		locationError = 'Posisjon utilgjengelig — GPS eller nettverksposisjon kreves.';
+		if (!position) position = NORWAY_FALLBACK;
+	}
+
 	onMount(() => {
 		if (!navigator.geolocation) {
 			locationError = 'Denne nettleseren støtter ikke posisjonering.';
+			position = NORWAY_FALLBACK;
 			return;
 		}
 
@@ -334,9 +349,7 @@
 				enableHighAccuracy: false
 			});
 			fallbackTimer = setTimeout(() => {
-				if (!position) {
-					locationError = 'Posisjon utilgjengelig — GPS eller nettverksposisjon kreves.';
-				}
+				if (!position) showLocationUnavailable();
 			}, 8000);
 		}
 
@@ -347,7 +360,7 @@
 
 		function onFallbackError(err: GeolocationPositionError) {
 			console.error('[geolocation:fallback]', err.code, err.message);
-			locationError = 'Posisjon utilgjengelig — GPS eller nettverksposisjon kreves.';
+			showLocationUnavailable();
 		}
 
 		watchId = navigator.geolocation.watchPosition(handlePosition, onInitialError, {
@@ -372,11 +385,13 @@
 		<GoogleMap
 			bind:this={mapComponent}
 			center={position}
-			zoom={10}
+			zoom={position === NORWAY_FALLBACK ? NORWAY_ZOOM : 10}
 			{route}
 			oncameraidle={onCameraIdle}
 			markers={[
-				{ id: '_me', position, alpha: 1, iconUrl: MY_LOCATION_ICON },
+				...(position !== NORWAY_FALLBACK
+					? [{ id: '_me', position, alpha: 1, iconUrl: MY_LOCATION_ICON }]
+					: []),
 				...(originPlaced && customOrigin
 					? [{ id: '_custom_origin', position: customOrigin, alpha: 1, iconUrl: CUSTOM_ORIGIN_ICON }]
 					: []),
