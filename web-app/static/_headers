@@ -6,6 +6,12 @@
 /index.html
   Cache-Control: no-cache, no-store, must-revalidate
 
+# Legacy Flutter service worker path — must always be revalidated so the
+# browser fetches the self-destruct script (static/flutter_service_worker.js)
+# instead of serving the old cached Flutter SW from its HTTP disk cache.
+/flutter_service_worker.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
 # Vite content-hashes everything under _app/immutable/, safe to cache forever.
 /_app/immutable/*
   Cache-Control: public, max-age=31536000, immutable

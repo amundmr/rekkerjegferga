@@ -2,6 +2,43 @@
 <html lang="no">
 	<head>
 		<meta charset="utf-8" />
+
+		<!--
+			Legacy Flutter self-destruct. This app used to be a Flutter Web app,
+			which installed a service worker (flutter_service_worker.js) that
+			aggressively caches and serves the old app shell offline. Returning
+			users would keep seeing the Flutter version even after this SvelteKit
+			app went live. This unregisters any leftover service worker, wipes
+			its cache storage, and reloads once (guarded so it can't loop) to
+			pull the fresh app. See also static/flutter_service_worker.js, which
+			self-unregisters when the browser re-checks the old SW path.
+		-->
+		<script>
+			(async function killLegacyFlutterSW() {
+				try {
+					let purged = false;
+					if ('serviceWorker' in navigator) {
+						const regs = await navigator.serviceWorker.getRegistrations();
+						for (const reg of regs) {
+							await reg.unregister();
+							purged = true;
+						}
+					}
+					if ('caches' in window) {
+						const names = await caches.keys();
+						if (names.length) purged = true;
+						await Promise.all(names.map((n) => caches.delete(n)));
+					}
+					if (purged && !sessionStorage.getItem('legacy-sw-purged')) {
+						sessionStorage.setItem('legacy-sw-purged', '1');
+						location.reload();
+					}
+				} catch (e) {
+					console.error('Legacy service worker purge failed', e);
+				}
+			})();
+		</script>
+
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="description" content="Sanntids ferge-kalkulator for Norge." />
 
