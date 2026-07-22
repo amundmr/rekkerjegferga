@@ -15,11 +15,26 @@ self.addEventListener('install', () => {
 
 self.addEventListener('activate', (event) => {
 	event.waitUntil(
-		self.registration
-			.unregister()
-			.then(() => self.clients.matchAll())
+		// clients.claim() takes control of tabs that are already open (opened
+		// under the old worker) immediately, rather than only affecting future
+		// navigations — otherwise an already-open tab may not be handed to
+		// this worker until it happens to reload some other way.
+		self.clients
+			.claim()
+			.then(() => self.registration.unregister())
+			.then(() => self.clients.matchAll({ type: 'window' }))
 			.then((clients) => {
-				clients.forEach((client) => client.navigate(client.url));
+				clients.forEach((client) => {
+					if ('navigate' in client) client.navigate(client.url);
+				});
 			})
 	);
+});
+
+// Belt-and-suspenders: a worker with no fetch listener already behaves as a
+// pure passthrough to the network per spec, but make that explicit in case a
+// browser implementation quirk (this whole file exists because of one)
+// serves something stale from an old cache instead.
+self.addEventListener('fetch', (event) => {
+	event.respondWith(fetch(event.request));
 });
