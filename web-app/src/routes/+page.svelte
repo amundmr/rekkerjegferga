@@ -13,7 +13,7 @@
 	import * as driveTimeService from '$lib/services/driveTime';
 	import * as favouritesService from '$lib/services/favourites';
 	import * as destinationPreferenceService from '$lib/services/destinationPreference';
-	import type { Departure, FerryStop, LatLng } from '$lib/types';
+	import { haversineMeters, type Departure, type FerryStop, type LatLng } from '$lib/types';
 
 	const MY_LOCATION_ICON =
 		'data:image/svg+xml;charset=UTF-8,' +
@@ -75,10 +75,29 @@
 
 	let selectedStop = $derived(stops[selectedIndex] as FerryStop | undefined);
 
-	// Ticks once a second so the countdown/margin labels stay live.
+	// Above this speed we treat the user as actively driving rather than
+	// standing still. GPS speed is noisy, so this is a coarse threshold, not
+	// a precise cutoff.
+	const DRIVING_SPEED_KMH = 20;
+	let speedKmh = $state<number | null>(null);
+	// Only meaningful when driving from the real device position — a custom
+	// origin's drive time isn't tied to the user's own movement at all.
+	let isDriving = $derived(customOrigin === null && (speedKmh ?? 0) > DRIVING_SPEED_KMH);
+
+	// `now` ticks every second and drives departure-selection logic (which
+	// departure counts as "next"), which must stay accurate regardless of
+	// display. `displayNow` is what the margin numbers are actually rendered
+	// from: while driving, watching the seconds visibly tick down is
+	// stressful and the number barely means anything between refreshes
+	// anyway, so it holds steady and only jumps when drive time is actually
+	// recalculated (see refreshDriveTime / shouldRefreshDriveTime below).
 	let now = $state(Date.now());
+	let displayNow = $state(Date.now());
 	onMount(() => {
-		const ticker = setInterval(() => (now = Date.now()), 1000);
+		const ticker = setInterval(() => {
+			now = Date.now();
+			if (!isDriving) displayNow = now;
+		}, 1000);
 		return () => clearInterval(ticker);
 	});
 
@@ -120,7 +139,7 @@
 
 	function marginFor(dep: Departure | null): number | null {
 		if (driveTimeSeconds === null || dep === null) return null;
-		return Math.round((dep.time.getTime() - now) / 1000) - driveTimeSeconds;
+		return Math.round((dep.time.getTime() - displayNow) / 1000) - driveTimeSeconds;
 	}
 
 	function formatMargin(seconds: number | null): string {
@@ -207,6 +226,30 @@
 		driveTimeSeconds = result.durationSeconds;
 		distanceMeters = result.distanceMeters;
 		route = result.route.map((p) => ({ lat: p.lat, lng: p.lng }));
+		// Jump the frozen display to the fresh value immediately; it then
+		// holds steady again until the next refresh if still driving.
+		displayNow = Date.now();
+		if (!customOrigin && position) {
+			lastDriveTimeAt = Date.now();
+			lastDriveTimePosition = position;
+		}
+	}
+
+	let lastDriveTimeAt: number | null = null;
+	let lastDriveTimePosition: LatLng | null = null;
+
+	// Mirrors the throttle the app used before: refresh at most once a
+	// minute, at least once every 10 minutes, or sooner if the device has
+	// moved more than 300m since the last refresh — avoids hammering the
+	// gateway on every single GPS tick while driving.
+	function shouldRefreshDriveTime(pos: LatLng): boolean {
+		if (customOrigin) return false;
+		if (lastDriveTimeAt === null) return true;
+		const elapsed = Date.now() - lastDriveTimeAt;
+		if (elapsed >= 10 * 60_000) return true;
+		if (elapsed < 60_000) return false;
+		if (!lastDriveTimePosition) return true;
+		return haversineMeters(lastDriveTimePosition, pos) > 300;
 	}
 
 	async function refreshDepartures() {
@@ -314,7 +357,15 @@
 	function handlePosition(pos: GeolocationPosition) {
 		position = { lat: pos.coords.latitude, lng: pos.coords.longitude };
 		locationError = null;
-		if (stops.length === 0 && !loadingStops) loadStopsFor(position.lat, position.lng);
+		// speed is in m/s and null when the device/browser can't determine it
+		// (e.g. stationary, or no compatible sensor) — treat unknown as
+		// "not driving" rather than guessing.
+		speedKmh = pos.coords.speed !== null ? pos.coords.speed * 3.6 : null;
+		if (stops.length === 0 && !loadingStops) {
+			loadStopsFor(position.lat, position.lng);
+		} else if (stops.length > 0 && shouldRefreshDriveTime(position)) {
+			refreshDriveTime();
+		}
 	}
 
 	// Falls back to a whole-of-Norway map view so the app stays usable (via
@@ -510,6 +561,7 @@
 			stopName={selectedStop.name}
 			departures={visibleDepartures}
 			{driveTimeSeconds}
+			now={displayNow}
 			onclose={() => (sheetOpen = false)}
 		/>
 	{/if}

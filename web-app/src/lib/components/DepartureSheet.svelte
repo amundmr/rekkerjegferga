@@ -7,16 +7,18 @@
 		stopName,
 		departures,
 		driveTimeSeconds,
+		now,
 		onclose
 	}: {
 		stopName: string;
 		departures: Departure[];
 		driveTimeSeconds: number | null;
+		now: number;
 		onclose: () => void;
 	} = $props();
 
 	function isPast(d: Departure): boolean {
-		return d.time.getTime() < Date.now();
+		return d.time.getTime() < now;
 	}
 
 	function timeStr(d: Departure): string {
@@ -25,7 +27,7 @@
 
 	function marginSeconds(d: Departure): number | null {
 		if (driveTimeSeconds === null) return null;
-		return Math.round((d.time.getTime() - Date.now()) / 1000) - driveTimeSeconds;
+		return Math.round((d.time.getTime() - now) / 1000) - driveTimeSeconds;
 	}
 
 	function marginLabel(d: Departure): string {

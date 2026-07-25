@@ -57,7 +57,18 @@
 			}
 			marker.setPosition(spec.position);
 			marker.setOpacity(spec.alpha ?? 1);
-			if (spec.iconUrl) marker.setIcon(spec.iconUrl);
+			if (spec.iconUrl) {
+				// A plain string icon URL anchors at the image's bottom-center by
+				// default (Maps treats it like a classic pin), not its visual
+				// center — our icons are 24x24 center-drawn dots, so without an
+				// explicit center anchor they render ~12px above their real
+				// coordinate.
+				marker.setIcon({
+					url: spec.iconUrl,
+					size: new google.maps.Size(24, 24),
+					anchor: new google.maps.Point(12, 12)
+				});
+			}
 		}
 		for (const [id, marker] of gMarkers) {
 			if (!seen.has(id)) {
