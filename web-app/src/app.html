@@ -40,7 +40,11 @@
 		</script>
 
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<meta name="description" content="Sanntids ferge-kalkulator for Norge." />
+		<meta
+			name="description"
+			content="Rekker jeg ferga? Sanntids fergekalkulator som viser kjøretid til nærmeste fergekai og margin til neste avgang, hvor som helst i Norge."
+		/>
+		<link rel="canonical" href="https://rekkerjegferga.no/" />
 
 		<meta name="mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-status-bar-style" content="black" />
@@ -50,7 +54,44 @@
 		<link rel="icon" type="image/x-icon" href="%sveltekit.assets%/favicon.ico" />
 		<link rel="manifest" href="%sveltekit.assets%/manifest.json" />
 
-		<title>Rekker jeg ferga?</title>
+		<title>Rekker jeg ferga? – Sanntids fergekalkulator for Norge</title>
+
+		<meta property="og:type" content="website" />
+		<meta property="og:site_name" content="Rekker jeg ferga?" />
+		<meta property="og:title" content="Rekker jeg ferga? – Sanntids fergekalkulator for Norge" />
+		<meta
+			property="og:description"
+			content="Sanntids fergekalkulator som viser kjøretid til nærmeste fergekai og margin til neste avgang, hvor som helst i Norge."
+		/>
+		<meta property="og:url" content="https://rekkerjegferga.no/" />
+		<meta property="og:image" content="https://rekkerjegferga.no/icons/Icon-512.png" />
+		<meta property="og:locale" content="nb_NO" />
+
+		<meta name="twitter:card" content="summary" />
+		<meta name="twitter:title" content="Rekker jeg ferga? – Sanntids fergekalkulator for Norge" />
+		<meta
+			name="twitter:description"
+			content="Sanntids fergekalkulator som viser kjøretid til nærmeste fergekai og margin til neste avgang, hvor som helst i Norge."
+		/>
+		<meta name="twitter:image" content="https://rekkerjegferga.no/icons/Icon-512.png" />
+
+		<script type="application/ld+json">
+			{
+				"@context": "https://schema.org",
+				"@type": "WebApplication",
+				"name": "Rekker jeg ferga?",
+				"url": "https://rekkerjegferga.no/",
+				"description": "Sanntids fergekalkulator som viser kjøretid til nærmeste fergekai og margin til neste avgang, hvor som helst i Norge.",
+				"applicationCategory": "TravelApplication",
+				"operatingSystem": "Any",
+				"inLanguage": "nb-NO",
+				"offers": {
+					"@type": "Offer",
+					"price": "0",
+					"priceCurrency": "NOK"
+				}
+			}
+		</script>
 
 		<!-- Maps JS key: restricted to *.rekkerjegferga.pages.dev/* in Google Cloud Console -->
 		<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCqYRTSr6guVm41bNo9AxvrYdMYVv7eXL0"></script>
@@ -59,5 +100,11 @@
 	</head>
 	<body data-sveltekit-preload-data="hover">
 		<div style="display: contents">%sveltekit.body%</div>
+		<noscript>
+			<p>
+				Rekker jeg ferga er en sanntids fergekalkulator for Norge. Den viser kjøretid til
+				nærmeste fergekai og margin til neste avgang. Skru på JavaScript for å bruke appen.
+			</p>
+		</noscript>
 	</body>
 </html>

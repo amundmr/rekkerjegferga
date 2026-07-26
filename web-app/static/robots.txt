@@ -1,3 +1,5 @@
-# allow crawling everything by default
+# allow crawling everything by default, including AI training crawlers
 User-agent: *
 Disallow:
+
+Sitemap: https://rekkerjegferga.no/sitemap.xml
