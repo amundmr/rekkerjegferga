@@ -1,16 +1,18 @@
 <script lang="ts">
-	import { Coffee, Info, LocateFixed, MoreVertical, Navigation, Star } from 'lucide-svelte';
+	import { HeartHandshake, Info, LocateFixed, MoreVertical, Navigation, Star } from 'lucide-svelte';
 
 	let {
 		oninfo,
 		oncustomorigin,
 		onfavourites,
-		onnavigate
+		onnavigate,
+		oncontribute
 	}: {
 		oninfo: () => void;
 		oncustomorigin: () => void;
 		onfavourites: () => void;
 		onnavigate: () => void;
+		oncontribute: () => void;
 	} = $props();
 
 	let open = $state(false);
@@ -48,13 +50,9 @@
 				<LocateFixed size={18} />
 				<span>Egendefinert startpunkt</span>
 			</button>
-			<button
-				class="item"
-				role="menuitem"
-				onclick={() => pick(() => window.open('https://buymeacoffee.com/amundmr', '_blank'))}
-			>
-				<Coffee size={18} />
-				<span>Spander en kaffe ☕</span>
+			<button class="item" role="menuitem" onclick={() => pick(oncontribute)}>
+				<HeartHandshake size={18} />
+				<span>Bidra</span>
 			</button>
 		</div>
 	{/if}

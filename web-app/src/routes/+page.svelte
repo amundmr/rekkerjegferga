@@ -6,6 +6,7 @@
 	import PortSwitcher from '$lib/components/PortSwitcher.svelte';
 	import OverflowMenu from '$lib/components/OverflowMenu.svelte';
 	import InfoDialog from '$lib/components/InfoDialog.svelte';
+	import ContributeDialog from '$lib/components/ContributeDialog.svelte';
 	import CustomOriginBanner from '$lib/components/CustomOriginBanner.svelte';
 	import FavouritesSheet from '$lib/components/FavouritesSheet.svelte';
 	import DestinationSwitcher from '$lib/components/DestinationSwitcher.svelte';
@@ -41,6 +42,7 @@
 
 	let sheetOpen = $state(false);
 	let infoOpen = $state(false);
+	let contributeOpen = $state(false);
 	let favouritesOpen = $state(false);
 
 	let favourites = $state<Record<string, string>>({});
@@ -551,6 +553,7 @@
 					oncustomorigin={enterCustomOriginMode}
 					onfavourites={() => (favouritesOpen = true)}
 					onnavigate={openNavigation}
+					oncontribute={() => (contributeOpen = true)}
 				/>
 			</div>
 		</div>
@@ -568,6 +571,10 @@
 
 	{#if infoOpen}
 		<InfoDialog onclose={() => (infoOpen = false)} />
+	{/if}
+
+	{#if contributeOpen}
+		<ContributeDialog onclose={() => (contributeOpen = false)} />
 	{/if}
 
 	{#if favouritesOpen}
